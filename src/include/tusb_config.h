@@ -116,7 +116,8 @@ extern int dh_debug_printf(const char *__restrict __format, ...);
  *==============================================================================*/
 
 // Enable HID (Human Interface Device) class (keyboard, mouse, etc.).
-#define CFG_TUD_HID    3
+// 3 of our own, plus up to 4 cloned from a passed-through Magic Trackpad.
+#define CFG_TUD_HID    7
 
 // Enable MSC (Mass Storage Class) class.
 #define CFG_TUD_MSC    1
@@ -127,7 +128,11 @@ extern int dh_debug_printf(const char *__restrict __format, ...);
  *==============================================================================*/
 
 // HID endpoint buffer size (must be large enough for report ID + data).
-#define CFG_TUD_HID_EP_BUFSIZE 32
+// Also bounds GET_REPORT / SET_REPORT payloads relayed to a Magic Trackpad.
+#define CFG_TUD_HID_EP_BUFSIZE 256
+
+// wMaxPacketSize of DeskHop's own HID endpoints.
+#define DH_HID_EP_SIZE 32
 
 // MSC endpoint buffer size.
 #define CFG_TUD_MSC_EP_BUFSIZE 512
@@ -137,7 +142,7 @@ extern int dh_debug_printf(const char *__restrict __format, ...);
  *  Configuration for the buffer used during device enumeration.
  *==============================================================================*/
 
-#define CFG_TUH_ENUMERATION_BUFSIZE 512
+#define CFG_TUH_ENUMERATION_BUFSIZE 1024
 
 /*==============================================================================
  *  Host: Class Configuration

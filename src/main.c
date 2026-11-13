@@ -30,6 +30,7 @@ int main(void) {
         [3] = {.exec = &process_mouse_queue_task, .frequency = _HZ(2000)},   // | Check if there were any mouse movements and send them
         [4] = {.exec = &process_hid_queue_task,   .frequency = _HZ(1000)},   // | Check if there are any packets to send over vendor link
         [5] = {.exec = &process_uart_tx_task,     .frequency = _TOP()},      // | Check if there are any packets to send over UART
+        [6] = {.exec = &tp_device_task,           .frequency = _TOP()},      // | Magic Trackpad passthrough, device side
     };                                                                       // `----- then go back and repeat forever
     const int NUM_TASKS = ARRAY_SIZE(tasks_core0);
 
@@ -63,6 +64,7 @@ void core1_main() {
         [4] = {.exec = &screensaver_task,        .frequency = _HZ(120)},     // | Handle "screensaver" movements
         [5] = {.exec = &firmware_upgrade_task,   .frequency = _HZ(4000)},    // | Send firmware to the other board if needed
         [6] = {.exec = &heartbeat_output_task,   .frequency = _HZ(1)},       // | Output periodic heartbeats
+        [7] = {.exec = &tp_host_task,            .frequency = _HZ(2000)},    // | Magic Trackpad passthrough, host side
     };                                                                       // `----- then go back and repeat forever
     const int NUM_TASKS = ARRAY_SIZE(tasks_core1);
 

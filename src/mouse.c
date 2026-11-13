@@ -367,11 +367,18 @@ void process_mouse_report(uint8_t *raw_report, int len, uint8_t itf, hid_interfa
         return;
     }
 
+    process_mouse_values(&values);
+}
+
+/* Move the pointer by already-decoded values (also used by the trackpad pointer mode) */
+void process_mouse_values(mouse_values_t *values) {
+    device_t *state = &global_state;
+
     /* Calculate and update mouse pointer movement. */
-    enum screen_pos_e switch_direction = update_mouse_position(state, &values);
+    enum screen_pos_e switch_direction = update_mouse_position(state, values);
 
     /* Create the report for the output PC based on the updated values */
-    mouse_report_t report = create_mouse_report(state, &values);
+    mouse_report_t report = create_mouse_report(state, values);
 
     /* Move the mouse, depending where the output is supposed to go */
     output_mouse_report(&report, state);

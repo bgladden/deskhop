@@ -22,9 +22,17 @@
  *  HID Interface Numbers
  *==============================================================================*/
 
-#define ITF_NUM_HID        0
-#define ITF_NUM_HID_REL_M  1
-#define ITF_NUM_HID_VENDOR 2
+/* Position of DeskHop's own HID interfaces, before any cloned trackpad interfaces */
+#define ITF_IDX_HID        0
+#define ITF_IDX_HID_REL_M  1
+#define ITF_IDX_HID_VENDOR 2
+
+/* Actual HID instance numbers. When a Magic Trackpad is being passed through,
+   its cloned interfaces come first and ours are shifted up by tp_itf_base. */
+extern volatile uint8_t tp_itf_base;
+#define ITF_NUM_HID        (tp_itf_base + ITF_IDX_HID)
+#define ITF_NUM_HID_REL_M  (tp_itf_base + ITF_IDX_HID_REL_M)
+#define ITF_NUM_HID_VENDOR (tp_itf_base + ITF_IDX_HID_VENDOR)
 #define ITF_NUM_MSC        3
 
 /*==============================================================================

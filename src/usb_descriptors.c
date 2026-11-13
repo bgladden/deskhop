@@ -28,8 +28,21 @@ tusb_desc_device_t const desc_device = DEVICE_DESCRIPTOR(0x1209, 0xc000);
 uint8_t const *tud_descriptor_device_cb(void) {
     if (global_state.config_mode_active)
         return (uint8_t const *)&desc_device_config;
-    else
-        return (uint8_t const *)&desc_device;
+
+    /* Passing a Magic Trackpad through: we are that trackpad now */
+    if (tp_active()) {
+        static tusb_desc_device_t desc_device_tp;
+
+        desc_device_tp                    = tp_profile()->dev;
+        desc_device_tp.bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE;
+        desc_device_tp.iManufacturer      = 0x01;
+        desc_device_tp.iProduct           = 0x02;
+        desc_device_tp.iSerialNumber      = 0x03;
+        desc_device_tp.bNumConfigurations = 0x01;
+        return (uint8_t const *)&desc_device_tp;
+    }
+
+    return (uint8_t const *)&desc_device;
 }
 
 //--------------------------------------------------------------------+
@@ -57,10 +70,16 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
         if (instance == ITF_NUM_HID_VENDOR)
             return desc_hid_report_vendor;
 
-    switch(instance) {
-        case ITF_NUM_HID:
+    /* Cloned trackpad interfaces come first, ours follow */
+    if (tp_active() && instance < tp_itf_base) {
+        const tp_profile_t *tp = tp_profile();
+        return &tp->pool[tp->itf[instance].rdesc_off];
+    }
+
+    switch(instance - tp_itf_base) {
+        case ITF_IDX_HID:
             return desc_hid_report;
-        case ITF_NUM_HID_REL_M:
+        case ITF_IDX_HID_REL_M:
             return desc_hid_report_relmouse;
         default:
             return desc_hid_report;
@@ -126,6 +145,14 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
     if (!serial_number[0]) {
        pico_get_unique_board_id_string(serial_number, sizeof(serial_number));
+    }
+
+    /* Use the trackpad's own manufacturer, product and serial strings when impersonating it */
+    if (tp_active() && !global_state.config_mode_active && index >= STRID_MANUFACTURER && index <= STRID_SERIAL) {
+        const uint16_t *cloned = tp_profile()->str[index - STRID_MANUFACTURER];
+
+        if ((cloned[0] & 0xff) >= 2)
+            return cloned;
     }
 
     if (index == 0) {
@@ -199,20 +226,20 @@ uint8_t const desc_configuration[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
 
     // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID,
+    TUD_HID_DESCRIPTOR(ITF_IDX_HID,
                        STRID_PRODUCT,
                        HID_ITF_PROTOCOL_KEYBOARD,
                        sizeof(desc_hid_report),
                        EPNUM_HID,
-                       CFG_TUD_HID_EP_BUFSIZE,
+                       DH_HID_EP_SIZE,
                        1),
 
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID_REL_M,
+    TUD_HID_DESCRIPTOR(ITF_IDX_HID_REL_M,
                        STRID_MOUSE,
                        HID_ITF_PROTOCOL_NONE,
                        sizeof(desc_hid_report_relmouse),
                        EPNUM_HID_REL_M,
-                       CFG_TUD_HID_EP_BUFSIZE,
+                       DH_HID_EP_SIZE,
                        1),
 #ifdef DH_DEBUG
     // Interface number, string index, EP notification address and size, EP data address (out, in) and size.
@@ -226,28 +253,28 @@ uint8_t const desc_configuration_config[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL_CONFIG, 0, CONFIG_TOTAL_LEN_CFG, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
 
     // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID,
+    TUD_HID_DESCRIPTOR(ITF_IDX_HID,
                        STRID_PRODUCT,
                        HID_ITF_PROTOCOL_KEYBOARD,
                        sizeof(desc_hid_report),
                        EPNUM_HID,
-                       CFG_TUD_HID_EP_BUFSIZE,
+                       DH_HID_EP_SIZE,
                        1),
 
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID_REL_M,
+    TUD_HID_DESCRIPTOR(ITF_IDX_HID_REL_M,
                        STRID_MOUSE,
                        HID_ITF_PROTOCOL_NONE,
                        sizeof(desc_hid_report_relmouse),
                        EPNUM_HID_REL_M,
-                       CFG_TUD_HID_EP_BUFSIZE,
+                       DH_HID_EP_SIZE,
                        1),
 
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID_VENDOR,
+    TUD_HID_DESCRIPTOR(ITF_IDX_HID_VENDOR,
                        STRID_VENDOR,
                        HID_ITF_PROTOCOL_NONE,
                        sizeof(desc_hid_report_vendor),
                        EPNUM_HID_VENDOR,
-                       CFG_TUD_HID_EP_BUFSIZE,
+                       DH_HID_EP_SIZE,
                        1),
 
     TUD_MSC_DESCRIPTOR(ITF_NUM_MSC,
@@ -262,11 +289,101 @@ uint8_t const desc_configuration_config[] = {
 #endif
 };
 
+
+//--------------------------------------------------------------------+
+// Magic Trackpad passthrough: configuration built at runtime
+//--------------------------------------------------------------------+
+
+/* Find an endpoint number nobody is using yet (bit n set = endpoint n taken) */
+static uint8_t tp_alloc_ep(uint16_t *used) {
+    for (uint8_t ep = 1; ep < 16; ep++) {
+        if (!(*used & (1u << ep))) {
+            *used |= (1u << ep);
+            return ep;
+        }
+    }
+    return 0;
+}
+
+/* The trackpad's HID interfaces, exactly as it describes them (same interface
+   numbers and endpoint addresses), followed by DeskHop's keyboard and mouse. */
+static uint8_t const *tp_build_configuration(void) {
+    static uint8_t desc[TUD_CONFIG_DESC_LEN + TP_MAX_ITF * TUD_HID_INOUT_DESC_LEN + 2 * TUD_HID_DESC_LEN + 80];
+    const tp_profile_t *tp = tp_profile();
+    uint16_t in_used = 0, out_used = 0;
+    uint8_t *p = desc + TUD_CONFIG_DESC_LEN;
+    uint8_t itf_count = 0;
+
+    for (int i = 0; i < tp->n_itf; i++) {
+        const tp_itf_t *itf = &tp->itf[i];
+        uint8_t cloned[] = {
+            /* Interface */
+            9, TUSB_DESC_INTERFACE, itf->itf_num, 0, (uint8_t)(itf->ep_out ? 2 : 1), TUSB_CLASS_HID, itf->subclass, itf->protocol, 0,
+            /* HID */
+            9, HID_DESC_TYPE_HID, U16_TO_U8S_LE(itf->bcd_hid), itf->country, 1, HID_DESC_TYPE_REPORT, U16_TO_U8S_LE(itf->rdesc_len),
+            /* Endpoint in */
+            7, TUSB_DESC_ENDPOINT, itf->ep_in, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(itf->ep_in_size), itf->ep_in_interval,
+            /* Endpoint out, if the trackpad has one */
+            7, TUSB_DESC_ENDPOINT, itf->ep_out, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(itf->ep_out_size), itf->ep_out_interval,
+        };
+        uint8_t len = itf->ep_out ? sizeof(cloned) : sizeof(cloned) - 7;
+
+        memcpy(p, cloned, len);
+        p += len;
+
+        in_used |= 1u << (itf->ep_in & 0x0f);
+        if (itf->ep_out)
+            out_used |= 1u << (itf->ep_out & 0x0f);
+
+        /* Our own interfaces are numbered after the highest one the trackpad uses */
+        if (itf->itf_num >= itf_count)
+            itf_count = itf->itf_num + 1;
+    }
+
+    uint8_t ep_kbd = 0x80 | tp_alloc_ep(&in_used);
+    uint8_t ep_rel = 0x80 | tp_alloc_ep(&in_used);
+
+    uint8_t own[] = {
+        TUD_HID_DESCRIPTOR(itf_count + ITF_IDX_HID, STRID_PRODUCT, HID_ITF_PROTOCOL_KEYBOARD,
+                           sizeof(desc_hid_report), ep_kbd, DH_HID_EP_SIZE, 1),
+        TUD_HID_DESCRIPTOR(itf_count + ITF_IDX_HID_REL_M, STRID_MOUSE, HID_ITF_PROTOCOL_NONE,
+                           sizeof(desc_hid_report_relmouse), ep_rel, DH_HID_EP_SIZE, 1),
+    };
+    memcpy(p, own, sizeof(own));
+    p += sizeof(own);
+    itf_count += 2;
+
+#ifdef DH_DEBUG
+    uint8_t ep_notif = 0x80 | tp_alloc_ep(&in_used);
+    uint8_t ep_cdc   = tp_alloc_ep(&in_used);
+    out_used |= 1u << ep_cdc;
+
+    uint8_t cdc[] = {
+        TUD_CDC_DESCRIPTOR(itf_count, STRID_DEBUG, ep_notif, 8, ep_cdc, 0x80 | ep_cdc, CFG_TUD_CDC_EP_BUFSIZE),
+    };
+    memcpy(p, cdc, sizeof(cdc));
+    p += sizeof(cdc);
+    itf_count += 2;
+#endif
+    (void)out_used;
+
+    uint16_t total = (uint16_t)(p - desc);
+    uint8_t header[] = {
+        TUD_CONFIG_DESCRIPTOR(1, itf_count, 0, total, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
+    };
+    memcpy(desc, header, sizeof(header));
+
+    return desc;
+}
+
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     (void)index; // for multiple configurations
 
     if (global_state.config_mode_active)
         return desc_configuration_config;
-    else
-        return desc_configuration;
+
+    if (tp_active())
+        return tp_build_configuration();
+
+    return desc_configuration;
 }

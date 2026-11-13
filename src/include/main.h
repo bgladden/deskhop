@@ -44,6 +44,7 @@
 #include "serial.h"
 #include "setup.h"
 #include "tasks.h"
+#include "trackpad.h"
 #include "watchdog.h"
 
 

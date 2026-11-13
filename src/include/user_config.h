@@ -226,3 +226,45 @@
  * */
 
 #define ENFORCE_KEYBOARD_BOOT_PROTOCOL 0
+
+
+/**================================================== *
+ * ==========  Magic Trackpad Passthrough  ========== *
+ * ================================================== *
+ *
+ * When an Apple Magic Trackpad is plugged in (by cable), DeskHop presents
+ * itself to both computers as that trackpad and relays its raw data to the
+ * active one, so macOS uses its own multitouch driver and all native gestures.
+ *
+ * TP_ENABLE: [0, 1] - 1 turns the passthrough on.
+ *
+ * TP_POINTER_MODE: [0, 1]
+ *   0 - Everything is passed through. Pointer movement feels 100% native, but
+ *       DeskHop can't see where the cursor is, so you switch computers with
+ *       the keyboard hotkey.
+ *   1 - EXPERIMENTAL. One finger drives DeskHop's own pointer (so moving past
+ *       the screen edge switches computers, like with a mouse) and is hidden
+ *       from the computer. Two or more fingers are passed through, so scroll,
+ *       pinch and swipe gestures stay native. Pointer acceleration, tap to
+ *       click and drag then come from DeskHop instead of macOS.
+ *
+ * TP_FORWARD_INACTIVE_SETS: [0, 1]
+ *   1 - Configuration requests from both computers reach the trackpad.
+ *   0 - Requests from the computer that isn't selected are only remembered
+ *       and applied when you switch to it.
+ *
+ * The remaining values only apply to TP_POINTER_MODE 1.
+ * */
+
+#define TP_ENABLE 1
+#define TP_POINTER_MODE 0
+#define TP_FORWARD_INACTIVE_SETS 1
+
+/* Trackpad units to mouse counts ratio */
+#define TP_POINTER_SCALE_NUM 1
+#define TP_POINTER_SCALE_DEN 6
+
+/* A touch shorter and stiller than this is a click */
+#define TP_TAP_TO_CLICK 1
+#define TP_TAP_MAX_US 180000
+#define TP_TAP_MAX_TRAVEL 60

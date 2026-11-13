@@ -89,6 +89,12 @@ const uart_handler_t uart_handler[] = {
 
     {.type = HEARTBEAT_MSG, .handler = handle_heartbeat_msg},
     {.type = PROXY_PACKET_MSG, .handler = handle_proxy_msg},
+
+    /* Magic Trackpad passthrough */
+    {.type = TP_FRAME_BEGIN_MSG, .handler = handle_tp_frame_begin_msg},
+    {.type = TP_FRAME_DATA_MSG, .handler = handle_tp_frame_data_msg},
+    {.type = TP_GET_REQ_MSG, .handler = handle_tp_get_req_msg},
+    {.type = TP_SYNC_REQ_MSG, .handler = handle_tp_sync_req_msg},
 };
 
 void process_packet(uart_packet_t *packet, device_t *state) {

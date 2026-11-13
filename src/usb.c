@@ -54,6 +54,10 @@ uint16_t tud_hid_get_report_cb(uint8_t instance,
                                hid_report_type_t report_type,
                                uint8_t *buffer,
                                uint16_t request_len) {
+    /* Cloned trackpad interfaces: ask the real trackpad */
+    if (tp_active() && instance < tp_itf_base)
+        return tp_dev_get_report(instance, report_id, report_type, buffer, request_len);
+
     /* Only the keyboard interface answers GET reports. */
     if (instance != ITF_NUM_HID)
         return 0;
@@ -86,6 +90,16 @@ void tud_hid_set_report_cb(uint8_t instance,
                            hid_report_type_t report_type,
                            uint8_t const *buffer,
                            uint16_t bufsize) {
+
+    /* Cloned trackpad interfaces: hand it to the real trackpad */
+    if (tp_active() && instance < tp_itf_base) {
+        tp_dev_set_report(instance, report_id, report_type, buffer, bufsize);
+        return;
+    }
+
+    /* Nothing else is addressed to interfaces other than ours */
+    if (instance != ITF_NUM_HID && instance != ITF_NUM_HID_VENDOR)
+        return;
 
     /* We received a report on the config report ID */
     if (instance == ITF_NUM_HID_VENDOR && report_id == REPORT_ID_VENDOR) {
@@ -171,6 +185,9 @@ void tud_cdc_rx_cb(uint8_t itf) {
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
     uint8_t itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
+    if (tp_host_unmounted(dev_addr))
+        return;
+
     if (dev_addr > MAX_DEVICES || instance >= MAX_INTERFACES)
         return;
 
@@ -196,6 +213,14 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report, uint16_t desc_len) {
     uint8_t itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
+
+    /* A Magic Trackpad isn't treated as a mouse, it gets passed through whole */
+    if (tp_host_is_trackpad(dev_addr)) {
+        tp_host_itf_mounted(dev_addr, instance);
+        blink_led(&global_state);
+        send_value(ENABLE, FLASH_LED_MSG);
+        return;
+    }
 
     if (dev_addr > MAX_DEVICES || instance >= MAX_INTERFACES)
         return;
@@ -263,6 +288,13 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_re
 /* Invoked when received report from device via interrupt endpoint */
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
     uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
+
+    /* Magic Trackpad reports are forwarded raw */
+    if (tp_host_is_trackpad(dev_addr)) {
+        tp_host_input(dev_addr, instance, report, len);
+        tuh_hid_receive_report(dev_addr, instance);
+        return;
+    }
 
     if (dev_addr > MAX_DEVICES || instance >= MAX_INTERFACES)
         return;

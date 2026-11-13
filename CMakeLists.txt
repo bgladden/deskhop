@@ -64,6 +64,7 @@ set(COMMON_SOURCES
   ${SRC_DIR}/setup.c
   ${SRC_DIR}/keyboard.c
   ${SRC_DIR}/mouse.c
+  ${SRC_DIR}/trackpad.c
   ${SRC_DIR}/tasks.c
   ${SRC_DIR}/led.c
   ${SRC_DIR}/uart.c

@@ -237,6 +237,9 @@ void initial_setup(device_t *state) {
     /* Initialize UART queue */
     queue_init(&state->uart_tx_queue, sizeof(uart_packet_t), UART_QUEUE_LENGTH);
 
+    /* Initialize Magic Trackpad passthrough */
+    tp_init();
+
     /* Apply the configured default for gaming mode (relative mode + switching lock) */
     state->gaming_mode = state->config.gaming_mode_default;
 
