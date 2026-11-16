@@ -55,6 +55,19 @@ To read the log, open the "DeskHop Debug" serial port (`screen /dev/tty.usbmodem
 `[tp]` show the capture result and every relayed `GET`/`SET` with its interface, report ID and result.
 That log is what is needed to fix whatever does not work.
 
+## Reading the status from the Mac
+
+Until the clone succeeds, the board reports its progress as its USB product name. Look in
+System Information > USB about three seconds after plugging the trackpad in (press Cmd-R to refresh).
+
+| Name shown | Meaning |
+|---|---|
+| `DeskHop Switch` | The board never saw the trackpad finish connecting on its USB port. |
+| `DH saw 05ac:XXXX` | An Apple device connected, but its model number `XXXX` is not one the firmware knows. |
+| `DH tp found XXXX` | The trackpad was recognised, but reading its details never finished. |
+| `DH tp fail ...` | Reading the trackpad's details failed; the rest of the name says at which step. |
+| `Magic Trackpad` | The clone is active. |
+
 ## Known unknowns
 
 - **Whether macOS binds its multitouch driver to the clone at all.** The clone matches the IDs, strings,

@@ -74,6 +74,7 @@ void tp_init(void);
 
 /* ---- Device side (core 0) ---- */
 bool tp_active(void);
+const char *tp_status_string(void);
 const tp_profile_t *tp_profile(void);
 void tp_device_task(device_t *state);
 uint16_t tp_dev_get_report(uint8_t slot, uint8_t report_id, uint8_t report_type, uint8_t *buffer, uint16_t reqlen);
@@ -82,6 +83,7 @@ void tp_dev_set_report(uint8_t slot, uint8_t report_id, uint8_t report_type, con
 /* ---- Host side (core 1) ---- */
 bool tp_host_is_trackpad(uint8_t dev_addr);
 void tp_host_itf_mounted(uint8_t dev_addr, uint8_t instance);
+void tp_host_device_mounted(uint8_t dev_addr);
 bool tp_host_unmounted(uint8_t dev_addr);
 void tp_host_input(uint8_t dev_addr, uint8_t instance, const uint8_t *report, uint16_t len);
 void tp_host_task(device_t *state);

@@ -119,6 +119,11 @@ static void tp_log(const char *fmt, ...) {
 
 static void tp_log_flush(void) {
     static tp_logline_t line;
+
+    /* Hold on to the lines until somebody opens the debug serial port */
+    if (!tud_cdc_connected())
+        return;
+
     if (queue_try_remove(&tp_log_q, &line))
         dh_debug_printf("[tp] %s\r\n", line.s);
 }
@@ -126,6 +131,30 @@ static void tp_log_flush(void) {
 #define tp_log(...) ((void)0)
 #define tp_log_flush() ((void)0)
 #endif
+
+/* ---------------- Status shown to the computer ---------------- */
+
+/* While we are not (yet) impersonating a trackpad, a short status replaces the
+   USB product name, so the progress can be read from the computer's USB device
+   list without any extra tools. */
+static char tp_status[28];
+static volatile uint64_t tp_status_at = 0; /* When to re-enumerate to show it, 0 = nothing pending */
+
+static void tp_set_status(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(tp_status, sizeof(tp_status), fmt, args);
+    va_end(args);
+
+    tp_log("status: %s", tp_status);
+
+    /* Give things a moment, a capture that succeeds makes this moot */
+    tp_status_at = time_us_64() + 2000000;
+}
+
+const char *tp_status_string(void) {
+    return (!tp_is_active && tp_status[0]) ? tp_status : NULL;
+}
 
 /* ---------------- UART framing ---------------- */
 
@@ -228,6 +257,18 @@ void tp_device_task(device_t *state) {
 
         reconnecting = true;
         reconnect_at = time_us_64() + TP_RECONNECT_US;
+    }
+
+    /* Nothing cloned, but there is something to report: re-enumerate so the new name shows */
+    if (tp_status_at && !reconnecting && !state->config_mode_active) {
+        if (tp_is_active) {
+            tp_status_at = 0;
+        } else if (time_us_64() >= tp_status_at) {
+            tp_status_at = 0;
+            tud_disconnect();
+            reconnecting = true;
+            reconnect_at = time_us_64() + TP_RECONNECT_US;
+        }
     }
 
     if (reconnecting) {
@@ -450,6 +491,22 @@ bool tp_host_is_trackpad(uint8_t dev_addr) {
     return false;
 }
 
+/* Any USB device finished enumerating on our host port */
+void tp_host_device_mounted(uint8_t dev_addr) {
+    uint16_t vid, pid;
+
+    if (!tuh_vid_pid_get(dev_addr, &vid, &pid) || vid != USB_VID_APPLE)
+        return;
+
+    if (tp_stage_valid)
+        return;
+
+    if (tp_host_is_trackpad(dev_addr))
+        tp_set_status("DH tp found %04x", pid);
+    else
+        tp_set_status("DH saw 05ac:%04x", pid);
+}
+
 /* A HID interface of the trackpad is ready. Start listening right away; descriptors
    are captured a moment later from the task loop, once all interfaces are up. */
 void tp_host_itf_mounted(uint8_t dev_addr, uint8_t instance) {
@@ -503,20 +560,26 @@ static bool tp_capture(tp_profile_t *p) {
 
     /* Device descriptor */
     if (!tp_ctrl(0x80, TUSB_REQ_GET_DESCRIPTOR, TUSB_DESC_DEVICE << 8, 0, tp_cfg_buf, sizeof(tusb_desc_device_t), &actual)
-        || actual < sizeof(tusb_desc_device_t))
+        || actual < sizeof(tusb_desc_device_t)) {
+        tp_set_status("DH tp fail dev");
         return false;
+    }
     memcpy(&p->dev, tp_cfg_buf, sizeof(tusb_desc_device_t));
 
     /* Configuration descriptor: header first to learn the length, then all of it */
-    if (!tp_ctrl(0x80, TUSB_REQ_GET_DESCRIPTOR, TUSB_DESC_CONFIGURATION << 8, 0, tp_cfg_buf, 9, &actual) || actual < 9)
+    if (!tp_ctrl(0x80, TUSB_REQ_GET_DESCRIPTOR, TUSB_DESC_CONFIGURATION << 8, 0, tp_cfg_buf, 9, &actual) || actual < 9) {
+        tp_set_status("DH tp fail cfg9");
         return false;
+    }
 
     uint16_t total = tu_u16(tp_cfg_buf[3], tp_cfg_buf[2]);
     if (total > sizeof(tp_cfg_buf))
         total = sizeof(tp_cfg_buf);
 
-    if (!tp_ctrl(0x80, TUSB_REQ_GET_DESCRIPTOR, TUSB_DESC_CONFIGURATION << 8, 0, tp_cfg_buf, total, &actual))
+    if (!tp_ctrl(0x80, TUSB_REQ_GET_DESCRIPTOR, TUSB_DESC_CONFIGURATION << 8, 0, tp_cfg_buf, total, &actual)) {
+        tp_set_status("DH tp fail cfg %u", total);
         return false;
+    }
     if (actual < total)
         total = actual;
 
@@ -574,21 +637,27 @@ static bool tp_capture(tp_profile_t *p) {
         off += dlen;
     }
 
-    if (p->n_itf == 0)
+    if (p->n_itf == 0) {
+        tp_set_status("DH tp fail nohid");
         return false;
+    }
 
     /* HID report descriptors, one per interface */
     for (int slot = 0; slot < p->n_itf; slot++) {
         tp_itf_t *itf = &p->itf[slot];
 
-        if (itf->rdesc_len == 0 || p->pool_len + itf->rdesc_len > TP_RDESC_POOL || !itf->ep_in)
+        if (itf->rdesc_len == 0 || p->pool_len + itf->rdesc_len > TP_RDESC_POOL || !itf->ep_in) {
+            tp_set_status("DH tp fail i%u l%u e%02x", itf->itf_num, itf->rdesc_len, itf->ep_in);
             return false;
+        }
 
         itf->rdesc_off = p->pool_len;
         if (!tp_ctrl(0x81, TUSB_REQ_GET_DESCRIPTOR, HID_DESC_TYPE_REPORT << 8, itf->itf_num,
                      &p->pool[itf->rdesc_off], itf->rdesc_len, &actual)
-            || actual != itf->rdesc_len)
+            || actual != itf->rdesc_len) {
+            tp_set_status("DH tp fail rd%u %u/%u", itf->itf_num, actual, itf->rdesc_len);
             return false;
+        }
 
         p->pool_len += itf->rdesc_len;
 
@@ -1118,6 +1187,8 @@ uint16_t tp_dev_get_report(uint8_t slot, uint8_t report_id, uint8_t report_type,
 void tp_dev_set_report(uint8_t slot, uint8_t report_id, uint8_t report_type, const uint8_t *buffer, uint16_t len) {}
 bool tp_host_is_trackpad(uint8_t dev_addr) { return false; }
 void tp_host_itf_mounted(uint8_t dev_addr, uint8_t instance) {}
+void tp_host_device_mounted(uint8_t dev_addr) {}
+const char *tp_status_string(void) { return NULL; }
 bool tp_host_unmounted(uint8_t dev_addr) { return false; }
 void tp_host_input(uint8_t dev_addr, uint8_t instance, const uint8_t *report, uint16_t len) {}
 void tp_host_task(device_t *state) {}

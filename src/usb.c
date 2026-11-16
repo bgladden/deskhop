@@ -182,6 +182,11 @@ void tud_cdc_rx_cb(uint8_t itf) {
  * ===============  USB HOST Section  =============== *
  * ================================================== */
 
+/* Invoked when any device has finished enumerating */
+void tuh_mount_cb(uint8_t dev_addr) {
+    tp_host_device_mounted(dev_addr);
+}
+
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
     uint8_t itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
