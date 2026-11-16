@@ -14,6 +14,7 @@
  */
 
 #include "main.h"
+#include "host/hcd.h"
 
 #if TP_ENABLE
 
@@ -982,6 +983,38 @@ static void tp_profile_tx(void) {
         tp_prof_tx_off = -1;
 }
 
+/* Something is electrically present on our host port, yet no device ever finished
+   enumerating: say so, it means the trackpad and our USB host don't get along. */
+static void tp_watch_port(void) {
+    static uint32_t samples = 0, present = 0;
+    static uint64_t window_end = 0;
+    static bool reported = false;
+
+    samples++;
+    if (hcd_port_connect_status(BOARD_TUH_RHPORT))
+        present++;
+
+    if (time_us_64() < window_end)
+        return;
+
+    bool plugged = samples > 0 && present * 2 > samples;
+    bool mounted = false;
+
+    for (uint8_t addr = 1; addr <= CFG_TUH_DEVICE_MAX + CFG_TUH_HUB; addr++)
+        mounted |= tuh_mounted(addr);
+
+    if (plugged && !mounted && !reported && !tp_stage_valid) {
+        tp_set_status("DH usb enum fail");
+        reported = true;
+    }
+
+    if (!plugged)
+        reported = false;
+
+    samples = present = 0;
+    window_end = time_us_64() + 3000000;
+}
+
 void tp_host_task(device_t *state) {
     static tp_job_t job;
     static uint8_t last_active   = 0xff;
@@ -1024,6 +1057,7 @@ void tp_host_task(device_t *state) {
     }
 
     tp_profile_tx();
+    tp_watch_port();
 
     /* Nobody has told us about a trackpad yet, keep asking the other board */
     if (!tp_stage_valid && !tp_daddr && time_us_64() >= next_sync_req) {

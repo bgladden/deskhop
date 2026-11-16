@@ -62,7 +62,9 @@ System Information > USB about three seconds after plugging the trackpad in (pre
 
 | Name shown | Meaning |
 |---|---|
-| `DeskHop Switch` | The board never saw the trackpad finish connecting on its USB port. |
+| `DeskHop Switch` | This board is not running the trackpad firmware (flash did not take, or the wrong board). |
+| `DeskHop Switch TP3` | Trackpad firmware is running, but nothing is detected on this board's USB port. |
+| `DH usb enum fail` | Something is plugged into this board's port, but it never finished connecting. |
 | `DH saw 05ac:XXXX` | An Apple device connected, but its model number `XXXX` is not one the firmware knows. |
 | `DH tp found XXXX` | The trackpad was recognised, but reading its details never finished. |
 | `DH tp fail ...` | Reading the trackpad's details failed; the rest of the name says at which step. |

@@ -168,8 +168,8 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
         const char *str = (index == STRID_SERIAL) ? serial_number : string_desc_arr[index];
 
         /* Trackpad passthrough progress, readable from the computer's USB device list */
-        if (index == STRID_PRODUCT && !global_state.config_mode_active && tp_status_string() != NULL)
-            str = tp_status_string();
+        if (index == STRID_PRODUCT && !global_state.config_mode_active)
+            str = (tp_status_string() != NULL) ? tp_status_string() : "DeskHop Switch TP3";
 
         // Cap at max char
         chr_count = strlen(str);
